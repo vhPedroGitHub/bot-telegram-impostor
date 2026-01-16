@@ -123,7 +123,14 @@ class ImpostorGame:
                 vote_count[voted_index] = 1
         
         # Encontrar el índice más votado
-        most_voted_index = max(vote_count.keys(), key=lambda x: vote_count[x])
+        max_votes = max(vote_count.values())
+        most_voted_indices = [idx for idx, votes in vote_count.items() if votes == max_votes]
+        
+        # Si hay empate, retornar None
+        if len(most_voted_indices) > 1:
+            return None
+        
+        most_voted_index = most_voted_indices[0]
         
         # Retornar el ID del jugador
         if most_voted_index < len(self.players_order):
