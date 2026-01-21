@@ -77,6 +77,8 @@ Bot para jugar al Impostor en grupos de Telegram
 start - Iniciar un nuevo juego
 cancel - Cancelar el juego actual
 end_meet - Terminar discusión y votar
+check_game - Ver estado del juego
+next_player - Pasar turno
 ```
 
 ## 🏃‍♂️ Ejecución
