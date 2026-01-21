@@ -28,6 +28,11 @@ class ImpostorGame:
         self.current_player = None
         self.players_order: List[int] = []
         self.players_played_this_round: List[int] = []
+        self.eliminated_players: List[int] = []  # Jugadores eliminados durante el juego
+        
+        # Seguimiento de palabras dichas por ronda
+        self.round_words: Dict[int, List[Dict]] = {}  # {round_num: [{'player_id': int, 'player_name': str, 'word': str}]}
+        self.current_round_words: List[Dict] = []  # Palabras de la ronda actual
         
         # Votación
         self.votes: Dict[int, int] = {}  # {voter_id: voted_player_index}
@@ -52,8 +57,10 @@ class ImpostorGame:
         if len(self.players) < 3:
             raise ValueError("Se necesitan al menos 3 jugadores")
         
+        # Mejorar aleatoriedad
         player_ids = list(self.players.keys())
         random.shuffle(player_ids)
+        random.shuffle(player_ids)  # Doble shuffle para mayor aleatoriedad
         
         # Seleccionar impostores
         self.impostors = player_ids[:self.num_impostors]
@@ -69,34 +76,87 @@ class ImpostorGame:
         # Seleccionar palabra aleatoria
         self.current_word = get_random_word()
         
-        # Establecer orden de juego
+        # Establecer orden de juego con mayor aleatoriedad
         self.players_order = player_ids.copy()
         random.shuffle(self.players_order)
+        random.shuffle(self.players_order)  # Doble shuffle
         
         self.state = "playing_round"
     
     def start_new_round(self):
         """Inicia una nueva ronda"""
+        # Guardar palabras de la ronda anterior si existían
+        if self.current_round > 0 and self.current_round_words:
+            self.round_words[self.current_round] = self.current_round_words.copy()
+        
         self.current_round += 1
+        self.current_round_words = []  # Limpiar palabras para nueva ronda
         self.current_player_index = 0
-        self.current_player = self.players_order[0]
+        
+        # Filtrar jugadores eliminados del orden
+        self.players_order = [p for p in self.players_order if p not in self.eliminated_players]
+        
+        self.current_player = self.players_order[0] if self.players_order else None
         self.players_played_this_round.clear()
         self.state = "playing_round"
+    
+    def add_word(self, player_id: int, word: str):
+        """Registra una palabra dicha por un jugador"""
+        if player_id in self.players:
+            self.current_round_words.append({
+                'player_id': player_id,
+                'player_name': self.players[player_id]['name'],
+                'word': word
+            })
+    
+    def get_round_words_summary(self, round_num: int = None) -> str:
+        """Obtiene un resumen de las palabras dichas en una ronda"""
+        if round_num is None:
+            round_num = self.current_round
+        
+        if round_num == self.current_round and self.current_round_words:
+            words = self.current_round_words
+        elif round_num in self.round_words:
+            words = self.round_words[round_num]
+        else:
+            return f"📝 No hay palabras registradas para la ronda {round_num}"
+        
+        if not words:
+            return f"📝 No hay palabras registradas para la ronda {round_num}"
+        
+        summary = f"📝 **PALABRAS - RONDA {round_num}**\n\n"
+        for entry in words:
+            summary += f"• **{entry['player_name']}**: {entry['word']}\n"
+        return summary
+    
+    def eliminate_player(self, player_id: int):
+        """Elimina un jugador del juego"""
+        if player_id not in self.eliminated_players:
+            self.eliminated_players.append(player_id)
+            # Remover de impostores si estaba ahí
+            if player_id in self.impostors:
+                self.impostors.remove(player_id)
     
     def next_player(self):
         """Pasa al siguiente jugador"""
         if self.current_player:
             self.players_played_this_round.append(self.current_player)
         
+        # Avanzar al siguiente jugador que no esté eliminado
         self.current_player_index += 1
-        if self.current_player_index < len(self.players_order):
-            self.current_player = self.players_order[self.current_player_index]
-        else:
-            self.current_player = None
+        while self.current_player_index < len(self.players_order):
+            potential_player = self.players_order[self.current_player_index]
+            if potential_player not in self.eliminated_players:
+                self.current_player = potential_player
+                return
+            self.current_player_index += 1
+        
+        self.current_player = None
     
     def all_players_played(self) -> bool:
-        """Verifica si todos los jugadores ya jugaron en esta ronda"""
-        return len(self.players_played_this_round) >= len(self.players)
+        """Verifica si todos los jugadores activos ya jugaron en esta ronda"""
+        active_players = [p for p in self.players_order if p not in self.eliminated_players]
+        return len(self.players_played_this_round) >= len(active_players)
     
     def get_current_player_name(self) -> str:
         """Obtiene el nombre del jugador actual"""

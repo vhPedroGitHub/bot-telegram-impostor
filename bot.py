@@ -342,7 +342,7 @@ async def handle_messages(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 # Enviar mensaje temporal de advertencia
                 warning_msg = await context.bot.send_message(
                     chat_id,
-                    f"⚠️ Solo {game.get_current_player_name()} puede escribir ahora."
+                    f"⚠️ Solo {game.get_current_player_name()} puede escribir ahora.\n💡 Usa /next-player para pasar turno."
                 )
                 # Borrar la advertencia después de 3 segundos
                 await asyncio.sleep(3)
@@ -368,19 +368,14 @@ async def handle_messages(update: Update, context: ContextTypes.DEFAULT_TYPE):
             await end_game(chat_id)
             return
         
-        # Pasar al siguiente jugador
-        game.next_player()
+        # Guardar la palabra dicha
+        game.add_word(user_id, message_text)
         
-        if game.all_players_played():
-            # Todos jugaron, iniciar discusión
-            await start_discussion(context.bot, chat_id, game, context)
-        else:
-            # Siguiente turno
-            await update.message.reply_text(
-                f"✅ Turno de **{game.get_current_player_name()}**\n"
-                f"💬 Solo esta persona puede escribir ahora.",
-                parse_mode='Markdown'
-            )
+        # Informar que debe usar /next-player
+        await update.message.reply_text(
+            f"✅ Palabra registrada: **{message_text}**\n👉 Usa /next-player cuando estés listo.",
+            parse_mode='Markdown'
+        )
 
 async def start_discussion(bot, chat_id, game, context=None):
     """Inicia la fase de discusión"""
@@ -549,18 +544,47 @@ async def end_voting(bot, chat_id, game):
     
     if most_voted_player in game.impostors:
         # ¡Atraparon a un impostor!
-        await bot.send_message(
-            chat_id,
-            f"🎯 **¡IMPOSTOR ELIMINADO!**\n\n"
-            f"👹 **{player_name}** era impostor ({vote_count} votos).\n\n"
-            f"🏆 **¡VICTORIA DE LOS CIUDADANOS!**\n\n"
-            f"🎮 **¡JUEGO TERMINADO!**\n\n"
-            f"👹 Impostores: {', '.join([game.players[p]['name'] for p in game.impostors])}\n"
-            f"👤 Ciudadanos: {', '.join([game.players[p]['name'] for p in game.citizens])}",
-            parse_mode='Markdown'
-        )
-        # Cuando se encuentra al impostor, el juego termina inmediatamente
-        await end_game(chat_id)
+        game.eliminate_player(most_voted_player)  # Eliminar del juego
+        
+        impostors_left = len(game.impostors)  # Impostores que quedan activos
+        
+        if impostors_left == 0:
+            # Todos los impostores eliminados - Ciudadanos ganan
+            await bot.send_message(
+                chat_id,
+                f"🎯 **¡IMPOSTOR ELIMINADO!**\n\n"
+                f"👹 **{player_name}** era impostor ({vote_count} votos).\n\n"
+                f"🏆 **¡VICTORIA DE LOS CIUDADANOS!**\n\n"
+                f"🎮 **¡JUEGO TERMINADO!** Todos los impostores eliminados.\n\n"
+                f"👹 Impostores eliminados: {', '.join([game.players[p]['name'] for p in game.eliminated_players if p in game.players])}\n"
+                f"👤 Ciudadanos: {', '.join([game.players[p]['name'] for p in game.citizens])}",
+                parse_mode='Markdown'
+            )
+            await end_game(chat_id)
+        else:
+            # Aún quedan impostores - continuar juego
+            await bot.send_message(
+                chat_id,
+                f"🎯 **¡IMPOSTOR ELIMINADO!**\n\n"
+                f"👹 **{player_name}** era impostor ({vote_count} votos).\n\n"
+                f"⚠️ Aún quedan {impostors_left} impostor(es) activo(s).\n"
+                f"🔄 Continuamos a la siguiente ronda...",
+                parse_mode='Markdown'
+            )
+            
+            if game.current_round >= game.max_rounds:
+                # Se acabaron las rondas pero quedan impostores
+                await bot.send_message(
+                    chat_id,
+                    f"🎮 **¡JUEGO TERMINADO!**\n\n"
+                    f"🏆 **¡VICTORIA DE LOS IMPOSTORES!**\n\n"
+                    f"Impostores restantes: {', '.join([game.players[p]['name'] for p in game.impostors])}",
+                    parse_mode='Markdown'
+                )
+                await end_game(chat_id)
+            else:
+                await asyncio.sleep(3)
+                await start_round(bot, chat_id, game)
     else:
         # No atraparon al impostor (eliminaron a un ciudadano)
         await bot.send_message(
@@ -633,6 +657,76 @@ async def end_meet_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
             )
     else:
         await update.message.reply_text("❌ No estamos en fase de discusión.")
+
+async def next_player_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Comando /next-player - El jugador actual pasa al siguiente turno"""
+    chat_id = update.effective_chat.id
+    user_id = update.effective_user.id
+    
+    if chat_id not in active_games:
+        await update.message.reply_text("❌ No hay juego activo.")
+        return
+    
+    game = active_games[chat_id]
+    
+    # Solo durante las rondas de juego
+    if game.state != "playing_round":
+        await update.message.reply_text("❌ No estamos en una ronda de juego.")
+        return
+    
+    # Solo el jugador actual puede usar este comando
+    if user_id != game.current_player:
+        await update.message.reply_text(
+            f"❌ No es tu turno. Es el turno de **{game.get_current_player_name()}**.",
+            parse_mode='Markdown'
+        )
+        return
+    
+    # Pasar al siguiente jugador
+    game.next_player()
+    
+    if game.all_players_played():
+        # Todos jugaron, mostrar resumen y empezar discusión
+        summary = game.get_round_words_summary()
+        await context.bot.send_message(chat_id, summary, parse_mode='Markdown')
+        await start_discussion(context.bot, chat_id, game, context)
+    else:
+        # Siguiente turno
+        await update.message.reply_text(
+            f"✅ Turno de **{game.get_current_player_name()}**\n"
+            f"💬 Solo esta persona puede escribir ahora.",
+            parse_mode='Markdown'
+        )
+
+async def check_game_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Comando /check-game - Muestra el estado actual del juego"""
+    chat_id = update.effective_chat.id
+    
+    if chat_id not in active_games:
+        await update.message.reply_text("❌ No hay juego activo.")
+        return
+    
+    game = active_games[chat_id]
+    
+    # Construir mensaje de estado
+    status_msg = f"🎮 **ESTADO DEL JUEGO**\n\n"
+    status_msg += f"🔄 Ronda: {game.current_round}/{game.max_rounds}\n"
+    status_msg += f"👥 Jugadores activos: {len([p for p in game.players_order if p not in game.eliminated_players])}\n"
+    
+    if game.eliminated_players:
+        eliminated_names = [game.players[p]['name'] for p in game.eliminated_players if p in game.players]
+        status_msg += f"❌ Eliminados: {', '.join(eliminated_names)}\n"
+    
+    status_msg += f"\n⚙️ Estado: {game.state}\n"
+    
+    if game.state == "playing_round" and game.current_player:
+        status_msg += f"🎯 Turno actual: **{game.get_current_player_name()}**\n"
+    
+    # Mostrar palabras de la ronda actual
+    if game.current_round_words:
+        status_msg += f"\n{game.get_round_words_summary()}"
+    
+    await update.message.reply_text(status_msg, parse_mode='Markdown')
 
 async def is_admin(bot, chat_id, user_id):
     """Verifica si el usuario es administrador del grupo"""
@@ -742,6 +836,8 @@ def main():
     application.add_handler(CommandHandler("start", start_command))
     application.add_handler(CommandHandler("cancel", cancel_command))
     application.add_handler(CommandHandler("end_meet", end_meet_command))
+    application.add_handler(CommandHandler("next_player", next_player_command))
+    application.add_handler(CommandHandler("check_game", check_game_command))
     
     # Callbacks
     application.add_handler(CallbackQueryHandler(continue_game_callback, pattern="^continue_game$"))
