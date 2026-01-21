@@ -33,6 +33,7 @@ class ImpostorGame:
         # Seguimiento de palabras dichas por ronda
         self.round_words: Dict[int, List[Dict]] = {}  # {round_num: [{'player_id': int, 'player_name': str, 'word': str}]}
         self.current_round_words: List[Dict] = []  # Palabras de la ronda actual
+        self.current_player_last_message: Optional[str] = None  # Último mensaje del jugador actual
         
         # Votación
         self.votes: Dict[int, int] = {}  # {voter_id: voted_player_index}
@@ -109,6 +110,17 @@ class ImpostorGame:
                 'word': word
             })
     
+    def set_current_player_message(self, message: str):
+        """Almacena temporalmente el último mensaje del jugador actual"""
+        self.current_player_last_message = message
+    
+    def save_current_player_word(self):
+        """Guarda la última palabra/frase del jugador actual cuando avanza de turno"""
+        if self.current_player_last_message and self.current_player_index is not None:
+            current_player_id = self.players_order[self.current_player_index]
+            self.add_word(current_player_id, self.current_player_last_message)
+            self.current_player_last_message = None
+    
     def get_round_words_summary(self, round_num: int = None) -> str:
         """Obtiene un resumen de las palabras dichas en una ronda"""
         if round_num is None:
@@ -124,9 +136,9 @@ class ImpostorGame:
         if not words:
             return f"📝 No hay palabras registradas para la ronda {round_num}"
         
-        summary = f"📝 **PALABRAS - RONDA {round_num}**\n\n"
+        summary = f"📝 PALABRAS - RONDA {round_num}\n\n"
         for entry in words:
-            summary += f"• **{entry['player_name']}**: {entry['word']}\n"
+            summary += f"• {entry['player_name']}: {entry['word']}\n"
         return summary
     
     def eliminate_player(self, player_id: int):

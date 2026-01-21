@@ -342,7 +342,7 @@ async def handle_messages(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 # Enviar mensaje temporal de advertencia
                 warning_msg = await context.bot.send_message(
                     chat_id,
-                    f"⚠️ Solo {game.get_current_player_name()} puede escribir ahora.\n💡 Usa /next-player para pasar turno."
+                    f"⚠️ Solo {game.get_current_player_name()} puede escribir ahora.\n💡 Usa /next_player para pasar turno."
                 )
                 # Borrar la advertencia después de 3 segundos
                 await asyncio.sleep(3)
@@ -368,14 +368,8 @@ async def handle_messages(update: Update, context: ContextTypes.DEFAULT_TYPE):
             await end_game(chat_id)
             return
         
-        # Guardar la palabra dicha
-        game.add_word(user_id, message_text)
-        
-        # Informar que debe usar /next-player
-        await update.message.reply_text(
-            f"✅ Palabra registrada: **{message_text}**\n👉 Usa /next-player cuando estés listo.",
-            parse_mode='Markdown'
-        )
+        # Guardar temporalmente el último mensaje (se registrará al ejecutar /next_player)
+        game.set_current_player_message(message_text)
 
 async def start_discussion(bot, chat_id, game, context=None):
     """Inicia la fase de discusión"""
@@ -677,10 +671,12 @@ async def next_player_command(update: Update, context: ContextTypes.DEFAULT_TYPE
     # Solo el jugador actual puede usar este comando
     if user_id != game.current_player:
         await update.message.reply_text(
-            f"❌ No es tu turno. Es el turno de **{game.get_current_player_name()}**.",
-            parse_mode='Markdown'
+            f"❌ No es tu turno. Es el turno de {game.get_current_player_name()}."
         )
         return
+    
+    # Guardar la última palabra/frase del jugador antes de avanzar
+    game.save_current_player_word()
     
     # Pasar al siguiente jugador
     game.next_player()
@@ -688,18 +684,17 @@ async def next_player_command(update: Update, context: ContextTypes.DEFAULT_TYPE
     if game.all_players_played():
         # Todos jugaron, mostrar resumen y empezar discusión
         summary = game.get_round_words_summary()
-        await context.bot.send_message(chat_id, summary, parse_mode='Markdown')
+        await context.bot.send_message(chat_id, summary)
         await start_discussion(context.bot, chat_id, game, context)
     else:
         # Siguiente turno
         await update.message.reply_text(
-            f"✅ Turno de **{game.get_current_player_name()}**\n"
-            f"💬 Solo esta persona puede escribir ahora.",
-            parse_mode='Markdown'
+            f"✅ Turno de {game.get_current_player_name()}\n"
+            f"💬 Solo esta persona puede escribir ahora."
         )
 
 async def check_game_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Comando /check-game - Muestra el estado actual del juego"""
+    """Comando /check_game - Muestra el estado actual del juego"""
     chat_id = update.effective_chat.id
     
     if chat_id not in active_games:
@@ -708,8 +703,8 @@ async def check_game_command(update: Update, context: ContextTypes.DEFAULT_TYPE)
     
     game = active_games[chat_id]
     
-    # Construir mensaje de estado
-    status_msg = f"🎮 **ESTADO DEL JUEGO**\n\n"
+    # Construir mensaje de estado sin Markdown para evitar errores
+    status_msg = f"🎮 ESTADO DEL JUEGO\n\n"
     status_msg += f"🔄 Ronda: {game.current_round}/{game.max_rounds}\n"
     status_msg += f"👥 Jugadores activos: {len([p for p in game.players_order if p not in game.eliminated_players])}\n"
     
@@ -720,13 +715,15 @@ async def check_game_command(update: Update, context: ContextTypes.DEFAULT_TYPE)
     status_msg += f"\n⚙️ Estado: {game.state}\n"
     
     if game.state == "playing_round" and game.current_player:
-        status_msg += f"🎯 Turno actual: **{game.get_current_player_name()}**\n"
+        status_msg += f"🎯 Turno actual: {game.get_current_player_name()}\n"
     
     # Mostrar palabras de la ronda actual
     if game.current_round_words:
-        status_msg += f"\n{game.get_round_words_summary()}"
+        status_msg += f"\n📝 PALABRAS DE LA RONDA {game.current_round}:\n"
+        for entry in game.current_round_words:
+            status_msg += f"  • {entry['player_name']}: {entry['word']}\n"
     
-    await update.message.reply_text(status_msg, parse_mode='Markdown')
+    await update.message.reply_text(status_msg)
 
 async def is_admin(bot, chat_id, user_id):
     """Verifica si el usuario es administrador del grupo"""
